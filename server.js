@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const JSZip = require('jszip');
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   ImageRun, Footer, AlignmentType, BorderStyle, WidthType,
@@ -29,13 +30,11 @@ function emptyPara(space=100) {
   return para([tx('')], { spacing: { before:0, after:space } });
 }
 
-// Dotted borders like modelo
 const dottedBorder  = { style: BorderStyle.DOTTED, size: 4, color: '767171' };
 const dottedBorders = { top:dottedBorder, bottom:dottedBorder, left:dottedBorder, right:dottedBorder };
 const noBorder      = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
 const noBorders     = { top:noBorder, bottom:noBorder, left:noBorder, right:noBorder };
 
-// Strip ALL leading bullets/numbers/roman AND surrounding whitespace
 function cleanLine(line) {
   return (line||'')
     .replace(/^[\s\u00a0]*(([ivxlcdmIVXLCDM]+|[0-9]+|[a-zA-Z])[\.\)\-]\s*)+/, '')
@@ -62,8 +61,6 @@ function bodyText(text) {
     indent: { left:720 }
   });
 }
-
-// Roman numeral item — NO extra indent, text starts right after label
 function actividadItem(rawText, num) {
   const label = ROMAN[num] || String(num+1);
   const text  = cleanLine(rawText);
@@ -77,7 +74,6 @@ function actividadItem(rawText, num) {
     tabStops: [{ type:TabStopType.LEFT, position:540 }]
   });
 }
-
 function idRow(label, value) {
   return new TableRow({ children:[
     new TableCell({
@@ -97,7 +93,6 @@ function idRow(label, value) {
     })
   ]});
 }
-
 function buildPhotoTable(fotosArr) {
   const colW = Math.floor(CONTENT_W/2)-60;
   const rows = [];
@@ -136,30 +131,78 @@ function buildPhotoTable(fotosArr) {
   });
 }
 
+function makeVerticalRunXml(codigo) {
+  return `<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:rPr><w:noProof/><w:color w:val="888888"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr>
+<w:drawing xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+           xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+           xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+<wp:anchor distT="0" distB="0" distL="114300" distR="114300"
+           simplePos="0" relativeHeight="251659264" behindDoc="0"
+           locked="0" layoutInCell="1" allowOverlap="1">
+  <wp:simplePos x="0" y="0"/>
+  <wp:positionH relativeFrom="column"><wp:posOffset>-1667323</wp:posOffset></wp:positionH>
+  <wp:positionV relativeFrom="paragraph"><wp:posOffset>-1041363</wp:posOffset></wp:positionV>
+  <wp:extent cx="2142894" cy="249382"/>
+  <wp:effectExtent l="0" t="0" r="0" b="0"/>
+  <wp:wrapNone/>
+  <wp:docPr id="99" name="code-vertical"/>
+  <wp:cNvGraphicFramePr/>
+  <a:graphic>
+    <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+      <wps:wsp>
+        <wps:cNvSpPr txBox="1"/>
+        <wps:spPr>
+          <a:xfrm rot="16200000">
+            <a:off x="0" y="0"/>
+            <a:ext cx="2142894" cy="249382"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+          <a:noFill/>
+          <a:ln w="6350"><a:noFill/></a:ln>
+        </wps:spPr>
+        <wps:txbx>
+          <w:txbxContent>
+            <w:p>
+              <w:r>
+                <w:rPr>
+                  <w:rFonts w:ascii="Segoe UI" w:hAnsi="Segoe UI" w:cs="Segoe UI"/>
+                  <w:color w:val="888888"/>
+                  <w:sz w:val="16"/><w:szCs w:val="16"/>
+                </w:rPr>
+                <w:t>${codigo}</w:t>
+              </w:r>
+            </w:p>
+          </w:txbxContent>
+        </wps:txbx>
+        <wps:bodyPr rot="0" vert="horz" wrap="square" anchor="t" anchorCtr="0">
+          <a:noAutofit/>
+        </wps:bodyPr>
+      </wps:wsp>
+    </a:graphicData>
+  </a:graphic>
+</wp:anchor>
+</w:drawing>
+</w:r>`;
+}
+
 async function generateDocx(data) {
   const { proyecto, codigoProyecto, ordenCompra, ordenTrabajo, fecha,
           actividades, hallazgos, fotos, situacionGeneral,
           cumplimientoCronograma, avanceProyecto, accionesRequeridas,
           avance, supervisor, supervisorIniciales, codigo } = data;
 
-  // ── HEADER: two separate paragraphs ──────────────────────
-  // Para 1: blue background, MPE white bold — exactly like modelo
+  // Header: Para 1 = blue+MPE, Para 2 = subtitle black
   const headerMPE = para(
-    [tx('MPE', { bold:true, size:28, color:'FFFFFF',
-      characterSpacing: 8 })],
-    {
-      shading: { fill:BLUE, type:ShadingType.CLEAR, color:'auto' },
-      spacing: { before:0, after:0 },
-      indent: { left:0 }
-    }
+    [tx('MPE', { bold:true, size:28, color:'FFFFFF', characterSpacing:8 })],
+    { shading:{ fill:BLUE, type:ShadingType.CLEAR, color:'auto' },
+      spacing:{ before:0, after:0 } }
   );
-  // Para 2: no background, "Sistema de Reportes de Visita" dark text
   const headerSubtitle = para(
     [tx('Sistema de Reportes de Visita', { size:23, color:'141413' })],
     { spacing:{ before:0, after:160 } }
   );
 
-  // ── ID TABLE ─────────────────────────────────────────────
   const idTable = new Table({
     width:{size:CONTENT_W,type:WidthType.DXA},
     columnWidths:[3397, CONTENT_W-3397],
@@ -175,104 +218,22 @@ async function generateDocx(data) {
     ]
   });
 
-  // ── FOOTER: vertical rotated text left + Pág X/Y right ───
-  // No top border line — clean footer
-  // Vertical text via XML textbox with rot=16200000 (270deg)
-  const footerCodeXml = `<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-        xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
-        xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
-    <w:rPr><w:noProof/><w:color w:val="888888"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr>
-    <w:drawing>
-      <wp:anchor distT="0" distB="0" distL="114300" distR="114300"
-                 simplePos="0" relativeHeight="251659264" behindDoc="0"
-                 locked="0" layoutInCell="1" allowOverlap="1">
-        <wp:simplePos x="0" y="0"/>
-        <wp:positionH relativeFrom="column"><wp:posOffset>-1667323</wp:posOffset></wp:positionH>
-        <wp:positionV relativeFrom="paragraph"><wp:posOffset>-1041363</wp:posOffset></wp:positionV>
-        <wp:extent cx="2142894" cy="249382"/>
-        <wp:effectExtent l="0" t="0" r="0" b="0"/>
-        <wp:wrapNone/>
-        <wp:docPr id="3" name="code-vertical"/>
-        <wp:cNvGraphicFramePr/>
-        <a:graphic>
-          <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
-            <wps:wsp>
-              <wps:cNvSpPr txBox="1"/>
-              <wps:spPr>
-                <a:xfrm rot="16200000">
-                  <a:off x="0" y="0"/>
-                  <a:ext cx="2142894" cy="249382"/>
-                </a:xfrm>
-                <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
-                <a:noFill/>
-                <a:ln w="6350"><a:noFill/></a:ln>
-              </wps:spPr>
-              <wps:txbx>
-                <w:txbxContent>
-                  <w:p>
-                    <w:pPr>
-                      <w:rPr>
-                        <w:color w:val="888888"/>
-                        <w:sz w:val="16"/><w:szCs w:val="16"/>
-                      </w:rPr>
-                    </w:pPr>
-                    <w:r>
-                      <w:rPr>
-                        <w:rFonts w:ascii="Segoe UI" w:hAnsi="Segoe UI" w:cs="Segoe UI"/>
-                        <w:color w:val="888888"/>
-                        <w:sz w:val="16"/><w:szCs w:val="16"/>
-                      </w:rPr>
-                      <w:t>${codigo}</w:t>
-                    </w:r>
-                  </w:p>
-                </w:txbxContent>
-              </wps:txbx>
-              <wps:bodyPr rot="0" vert="horz" wrap="square" anchor="t" anchorCtr="0">
-                <a:noAutofit/>
-              </wps:bodyPr>
-            </wps:wsp>
-          </a:graphicData>
-        </a:graphic>
-      </wp:anchor>
-    </w:drawing>
-  </w:r>`;
-
-  // Build footer paragraph: vertical code (floating) + Pág X/Y right aligned
-  // No border/line on footer
-  class RawXmlRun extends TextRun {
-    constructor(xml) {
-      super('');
-      this._xml = xml;
-    }
-    prepForXml(context) {
-      return { 'w:r': [] };
-    }
-  }
-
-  // Use standard footer with page numbers only, vertical text via XML injection
+  // Footer: Pág X/Y right only — vertical code injected via JSZip later
   const footer = new Footer({
-    children: [
+    children:[
       para([
-        // Empty run that holds the floating vertical textbox
-        new TextRun({
-          text: '',
-          xmlSpacePreserve: true
-        }),
         tx('Pág ', { size:16, color:'888888' }),
         new TextRun({ children:[PageNumber.CURRENT], font:FONT, size:16, color:'888888' }),
         tx(' / ', { size:16, color:'888888' }),
         new TextRun({ children:[PageNumber.TOTAL_PAGES], font:FONT, size:16, color:'888888' }),
       ], {
-        // NO border — clean footer without line
+        // NO border line
         tabStops:[{ type:TabStopType.RIGHT, position:TabStopPosition.MAX }],
         spacing:{ before:60, after:0 }
       })
     ]
   });
 
-  // ── CONTENT ───────────────────────────────────────────────
   const actLines = (actividades||'').split('\n').map(l=>l.trim()).filter(l=>l.length>0);
   const actItems = actLines.length
     ? actLines.map((l,i)=>actividadItem(l,i))
@@ -295,7 +256,6 @@ async function generateDocx(data) {
   const otDisplay = (ordenTrabajo&&ordenTrabajo.trim()&&ordenTrabajo.trim()!==codigoProyecto)
     ? ordenTrabajo.trim() : (ordenCompra||'—');
 
-  // ── BUILD DOC ─────────────────────────────────────────────
   const doc = new Document({
     styles:{ default:{ document:{ run:{ font:FONT, size:20 } } } },
     sections:[{
@@ -308,40 +268,25 @@ async function generateDocx(data) {
       },
       footers:{ default:footer },
       children:[
-        // HEADER
         headerMPE,
         headerSubtitle,
-
-        // ID TABLE
         idTable,
         emptyPara(160),
-
-        // SUBTITLE
         para([tx('Reporte Técnico de Visita de Supervisión',{bold:true,size:24})],
           {alignment:AlignmentType.CENTER,spacing:{before:200,after:120}}),
-
-        // MINI FICHA
         para([tx('Proyecto      :  '+proyecto,{size:20})],{spacing:{before:0,after:40}}),
         para([tx('Orden Trabajo :  '+otDisplay,{size:20})],{spacing:{before:0,after:40}}),
         para([tx('Fecha Visita  :  '+fecha,{size:20})],{spacing:{before:0,after:80}}),
         emptyPara(120),
-
-        // 1.0
         secTitle('1.0 Actividades Realizadas'),
         ...actItems,
         emptyPara(),
-
-        // 2.0
         secTitle('2.0 Hallazgos'),
         ...hallItems,
         emptyPara(),
-
-        // 3.0
         secTitle('3.0 Registro Fotográfico'),
         ...fotosItems,
         emptyPara(),
-
-        // 4.0
         secTitle('4.0 Comentarios y Acciones'),
         subSecTitle('4.1 Situación General'),
         bodyText(cleanLine(situacionGeneral||'No se registran observaciones críticas.')),
@@ -357,81 +302,20 @@ async function generateDocx(data) {
     }]
   });
 
-  // Generate buffer then inject vertical text XML into footer
+  // Generate base buffer
   let buffer = await Packer.toBuffer(doc);
 
-  // Post-process: inject vertical rotated textbox into footer XML
-  const JSZip = require('/home/claude/.npm-global/lib/node_modules/docx/node_modules/jszip');
+  // Inject vertical rotated textbox into footer via JSZip
   const zip = await JSZip.loadAsync(buffer);
+  const footerFiles = Object.keys(zip.files).filter(f=>f.match(/word\/footer\d+\.xml/));
 
-  // Find footer file
-  const footerFiles = Object.keys(zip.files).filter(f => f.match(/word\/footer\d+\.xml/));
   if (footerFiles.length > 0) {
-    let footerXml = await zip.files[footerFiles[0]].async('string');
-
-    // Inject the vertical textbox run before Pág text
-    const verticalRunXml = `<w:r>
-      <w:rPr><w:noProof/><w:color w:val="888888"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr>
-      <w:drawing>
-        <wp:anchor distT="0" distB="0" distL="114300" distR="114300"
-                   simplePos="0" relativeHeight="251659264" behindDoc="0"
-                   locked="0" layoutInCell="1" allowOverlap="1"
-                   xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
-          <wp:simplePos x="0" y="0"/>
-          <wp:positionH relativeFrom="column"><wp:posOffset>-1667323</wp:posOffset></wp:positionH>
-          <wp:positionV relativeFrom="paragraph"><wp:posOffset>-1041363</wp:posOffset></wp:positionV>
-          <wp:extent cx="2142894" cy="249382"/>
-          <wp:effectExtent l="0" t="0" r="0" b="0"/>
-          <wp:wrapNone/>
-          <wp:docPr id="99" name="code-vertical"/>
-          <wp:cNvGraphicFramePr/>
-          <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-            <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
-              <wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
-                <wps:cNvSpPr txBox="1"/>
-                <wps:spPr>
-                  <a:xfrm rot="16200000">
-                    <a:off x="0" y="0"/>
-                    <a:ext cx="2142894" cy="249382"/>
-                  </a:xfrm>
-                  <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
-                  <a:noFill/>
-                  <a:ln w="6350"><a:noFill/></a:ln>
-                </wps:spPr>
-                <wps:txbx>
-                  <w:txbxContent>
-                    <w:p>
-                      <w:r>
-                        <w:rPr>
-                          <w:rFonts w:ascii="Segoe UI" w:hAnsi="Segoe UI" w:cs="Segoe UI"/>
-                          <w:color w:val="888888"/>
-                          <w:sz w:val="16"/><w:szCs w:val="16"/>
-                        </w:rPr>
-                        <w:t>${codigo}</w:t>
-                      </w:r>
-                    </w:p>
-                  </w:txbxContent>
-                </wps:txbx>
-                <wps:bodyPr rot="0" vert="horz" wrap="square" anchor="t" anchorCtr="0">
-                  <a:noAutofit/>
-                </wps:bodyPr>
-              </wps:wsp>
-            </a:graphicData>
-          </a:graphic>
-        </wp:anchor>
-      </w:drawing>
-    </w:r>`;
-
-    // Insert before the first <w:r> that contains "Pág"
-    footerXml = footerXml.replace(/<w:t>Pág\s*<\/w:t>/, match => {
-      return match; // keep original
-    });
-
-    // Insert vertical run at start of footer paragraph content
-    footerXml = footerXml.replace(/(<w:p\b[^>]*>[\s\S]*?<w:pPr>[\s\S]*?<\/w:pPr>)/, '$1' + verticalRunXml);
-
-    zip.file(footerFiles[0], footerXml);
-    buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    let fXml = await zip.files[footerFiles[0]].async('string');
+    const vertRun = makeVerticalRunXml(codigo);
+    // Insert vertical run right after the first <w:pPr>...</w:pPr> in footer
+    fXml = fXml.replace(/(<\/w:pPr>)/, '$1' + vertRun);
+    zip.file(footerFiles[0], fXml);
+    buffer = await zip.generateAsync({ type:'nodebuffer', compression:'DEFLATE' });
   }
 
   return buffer;
