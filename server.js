@@ -239,18 +239,18 @@ async function generateDocx(data) {
     ? actLines.map((l,i)=>actividadItem(l,i))
     : [bodyText('No se ingresó información.')];
 
-  const hallLines = (hallazgos||'').split('\n').map(l=>cleanLine(l)).filter(l=>l.length>0);
+  const hallLines = (hallazgos||'').split('\n').map(l=>l.trim()).filter(l=>l.length>0);
   const hallItems = hallLines.length
-    ? hallLines.map(l=>bodyText(l))
+    ? hallLines.map((l,i)=>actividadItem(l,i))
     : [bodyText('No se registraron hallazgos significativos durante la presente visita de supervisión.')];
 
   const fotosItems = (fotos&&fotos.length)
     ? [buildPhotoTable(fotos)]
     : [bodyText('No se registraron fotografías en esta visita.')];
 
-  const accLines = (accionesRequeridas||'').split('\n').map(l=>cleanLine(l)).filter(l=>l.length>0);
+  const accLines = (accionesRequeridas||'').split('\n').map(l=>l.trim()).filter(l=>l.length>0);
   const accItems = accLines.length
-    ? accLines.map(l=>bodyText(l))
+    ? accLines.map((l,i)=>actividadItem(l,i))
     : [bodyText('No se identifican acciones inmediatas.')];
 
   const otDisplay = (ordenTrabajo&&ordenTrabajo.trim()&&ordenTrabajo.trim()!==codigoProyecto)
