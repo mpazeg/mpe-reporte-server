@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const JSZip = require('jszip');
-const htmlPdf = require('html-pdf-node');
+const { generatePdfBuffer } = require('./pdf_generator');
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   ImageRun, Footer, AlignmentType, BorderStyle, WidthType,
@@ -84,15 +84,38 @@ function idRow(label, value) {
 }
 function buildPhotoTable(fotosArr) {
   const colW = Math.floor(CONTENT_W/2)-60;
+  const MAX_W = 215;
+  const MAX_H = 170;
   const rows = [];
   for (let i=0; i<fotosArr.length; i+=2) {
     const f1=fotosArr[i], f2=fotosArr[i+1]||null;
     function photoCell(f) {
       if (!f) return new TableCell({ borders:noBorders, width:{size:colW,type:WidthType.DXA}, children:[emptyPara()] });
-      let imgData, imgType;
+      let imgData, imgType, imgW=MAX_W, imgH=MAX_H;
       try {
         imgData=Buffer.from(f.b64.split(',')[1],'base64');
         imgType=f.b64.startsWith('data:image/png')?'png':'jpg';
+        // Read actual dimensions to preserve aspect ratio
+        try {
+          let w=0, h=0;
+          if (imgType==='jpg') {
+            for (let pos=0; pos<imgData.length-8; pos++) {
+              if (imgData[pos]===0xFF&&(imgData[pos+1]===0xC0||imgData[pos+1]===0xC2)) {
+                h=(imgData[pos+5]<<8)|imgData[pos+6];
+                w=(imgData[pos+7]<<8)|imgData[pos+8];
+                break;
+              }
+            }
+          } else {
+            w=(imgData[16]<<24)|(imgData[17]<<16)|(imgData[18]<<8)|imgData[19];
+            h=(imgData[20]<<24)|(imgData[21]<<16)|(imgData[22]<<8)|imgData[23];
+          }
+          if (w>0&&h>0) {
+            const ratio=w/h;
+            imgW=MAX_W; imgH=Math.round(MAX_W/ratio);
+            if (imgH>MAX_H){imgH=MAX_H;imgW=Math.round(MAX_H*ratio);}
+          }
+        } catch(ex){}
       } catch(e) {
         return new TableCell({ borders:noBorders, width:{size:colW,type:WidthType.DXA},
           children:[para([tx(f.legend||'',{size:16})],{alignment:AlignmentType.CENTER})] });
@@ -103,7 +126,7 @@ function buildPhotoTable(fotosArr) {
         margins:{top:80,bottom:80,left:60,right:60},
         children:[
           para([new ImageRun({type:imgType,data:imgData,
-            transformation:{width:215,height:155},
+            transformation:{width:imgW,height:imgH},
             altText:{title:legend||'foto',description:legend,name:legend||'foto'}})],
             {alignment:AlignmentType.CENTER,spacing:{before:0,after:40}}),
           para([tx(legend,{size:16})],{alignment:AlignmentType.CENTER,spacing:{before:0,after:80}})
@@ -381,23 +404,11 @@ async function generateDocx(data) {
 }
 
 async function generatePdf(data) {
-  const logoPath = path.join(__dirname, 'logo.jpg');
-  let logoB64 = '';
-  try {
-    logoB64 = 'data:image/jpeg;base64,' + fs.readFileSync(logoPath).toString('base64');
-  } catch(e) {}
-  const html = buildHtmlDoc(data, logoB64);
-  const file = { content: html };
-  const options = {
-    format: 'A4',
-    margin: { top: '2cm', right: '2.5cm', bottom: '2.5cm', left: '2.5cm' },
-    printBackground: true
-  };
-  return await htmlPdf.generatePdf(file, options);
+  return await generatePdfBuffer(data);
 }
 
 // ── ROUTES ────────────────────────────────────────────────
-app.get('/', (req,res) => res.json({status:'MPE Reporte Server OK',version:'3.1'}));
+app.get('/', (req,res) => res.json({status:'MPE Reporte Server OK',version:'3.2'}));
 
 app.post('/generar', async (req,res) => {
   try {
