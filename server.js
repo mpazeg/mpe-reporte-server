@@ -385,7 +385,33 @@ async function generateDocx(data) {
 }
 
 async function generatePdf(data) {
-  return await generatePdfBuffer(data);
+  const { execSync } = require('child_process');
+  const os = require('os');
+  const pathLib = require('path');
+
+  // Generate DOCX first
+  const docxBuffer = await generateDocx(data);
+
+  // Write to temp file
+  const tmpDir = os.tmpdir();
+  const tmpDocx = pathLib.join(tmpDir, 'mpe_report_'+Date.now()+'.docx');
+  const tmpPdf  = tmpDocx.replace('.docx','.pdf');
+
+  fs.writeFileSync(tmpDocx, docxBuffer);
+
+  try {
+    // Convert using LibreOffice
+    execSync('libreoffice --headless --convert-to pdf --outdir '+tmpDir+' '+tmpDocx, {
+      timeout: 60000,
+      stdio: 'pipe'
+    });
+
+    const pdfBuffer = fs.readFileSync(tmpPdf);
+    return pdfBuffer;
+  } finally {
+    try { fs.unlinkSync(tmpDocx); } catch(e) {}
+    try { fs.unlinkSync(tmpPdf);  } catch(e) {}
+  }
 }
 
 // ── ROUTES ────────────────────────────────────────────────
