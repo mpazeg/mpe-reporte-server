@@ -1,4 +1,3 @@
-// PDF generation using PDFKit — no Chromium needed
 function generatePdfBuffer(data) {
   return new Promise((resolve, reject) => {
     const PDFDocument = require('pdfkit');
@@ -6,11 +5,11 @@ function generatePdfBuffer(data) {
 
     const doc = new PDFDocument({
       size: 'A4',
-      margins: { top: 57, right: 68, bottom: 57, left: 68 }
+      margins: { top: 57, right: 68, bottom: 80, left: 68 },
+      bufferPages: true
     });
 
     doc.on('data', chunk => chunks.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
     const {
@@ -25,7 +24,7 @@ function generatePdfBuffer(data) {
     const DOTGRAY = '#767171';
     const BLACK = '#1a1a1a';
     const LIGHT_BLUE = '#EDF2FA';
-    const PAGE_W = doc.page.width - 136; // content width
+    const PAGE_W = doc.page.width - 136;
 
     const ROMAN = ['i','ii','iii','iv','v','vi','vii','viii','ix','x',
                    'xi','xii','xiii','xiv','xv','xvi','xvii','xviii','xix','xx'];
@@ -63,17 +62,14 @@ function generatePdfBuffer(data) {
     let ty = doc.y + 6;
 
     rows.forEach(([label, value]) => {
-      // Label cell (light blue bg)
       doc.rect(68, ty, colW1, rowH).fillAndStroke(LIGHT_BLUE, DOTGRAY);
       doc.fillColor(BLACK).font('Helvetica-Bold').fontSize(9)
          .text(label, 72, ty+4, { width: colW1-8, lineBreak: false });
-      // Value cell
       doc.rect(68+colW1, ty, colW2, rowH).fillAndStroke('white', DOTGRAY);
       doc.fillColor(BLACK).font('Helvetica').fontSize(9)
          .text(String(value||'—'), 72+colW1, ty+4, { width: colW2-8, lineBreak: false });
       ty += rowH;
     });
-
     doc.y = ty + 10;
 
     // ── SUBTITLE ─────────────────────────────────────────
@@ -90,13 +86,17 @@ function generatePdfBuffer(data) {
     doc.text('Fecha Visita  :  '+fecha, 68);
     doc.moveDown(0.8);
 
-    // ── SECTION HELPER ───────────────────────────────────
+    function checkNewPage(needed) {
+      if (doc.y + needed > doc.page.height - 80) doc.addPage();
+    }
     function secTitle(text) {
+      checkNewPage(40);
       doc.moveDown(0.4);
       doc.font('Helvetica-Bold').fontSize(11).fillColor(BLACK).text(text, 68);
       doc.moveDown(0.3);
     }
     function subSecTitle(text) {
+      checkNewPage(30);
       doc.moveDown(0.3);
       doc.font('Helvetica-Bold').fontSize(10).fillColor(BLACK).text(text, 88);
       doc.moveDown(0.2);
@@ -109,9 +109,10 @@ function generatePdfBuffer(data) {
     function romanItem(rawText, num) {
       const label = ROMAN[num] || String(num+1);
       const text = cleanLine(rawText);
+      checkNewPage(25);
       const startY = doc.y;
       doc.font('Helvetica').fontSize(10).fillColor(BLACK)
-         .text(label+'.', 88, startY, { width: 20, continued: false });
+         .text(label+'.', 88, startY, { width: 20, lineBreak: false });
       doc.font('Helvetica').fontSize(10).fillColor(BLACK)
          .text(text, 112, startY, { width: PAGE_W-44, align: 'justify' });
       doc.moveDown(0.3);
@@ -138,24 +139,22 @@ function generatePdfBuffer(data) {
       const imgH = imgW * 0.72;
       for (let i = 0; i < fotos.length; i += 2) {
         const f1 = fotos[i], f2 = fotos[i+1]||null;
-        // Check if need new page
-        if (doc.y + imgH + 30 > doc.page.height - 80) doc.addPage();
+        const idx1 = i+1, idx2 = i+2;
+        checkNewPage(imgH + 30);
         const rowY = doc.y;
-        // Photo 1
         try {
           const imgBuf1 = Buffer.from(f1.b64.split(',')[1], 'base64');
-          doc.image(imgBuf1, 68, rowY, { width: imgW, height: imgH, fit: [imgW, imgH] });
+          doc.image(imgBuf1, 68, rowY, { width: imgW, height: imgH });
         } catch(e) {}
         doc.font('Helvetica').fontSize(8).fillColor(BLACK)
-           .text(f1.legend||'', 68, rowY+imgH+2, { width: imgW, align: 'center' });
-        // Photo 2
+           .text('Foto '+idx1+': '+(f1.legend||''), 68, rowY+imgH+3, { width: imgW, align: 'center' });
         if (f2) {
           try {
             const imgBuf2 = Buffer.from(f2.b64.split(',')[1], 'base64');
-            doc.image(imgBuf2, 68+imgW+20, rowY, { width: imgW, height: imgH, fit: [imgW, imgH] });
+            doc.image(imgBuf2, 68+imgW+20, rowY, { width: imgW, height: imgH });
           } catch(e) {}
           doc.font('Helvetica').fontSize(8).fillColor(BLACK)
-             .text(f2.legend||'', 68+imgW+20, rowY+imgH+2, { width: imgW, align: 'center' });
+             .text('Foto '+idx2+': '+(f2.legend||''), 68+imgW+20, rowY+imgH+3, { width: imgW, align: 'center' });
         }
         doc.y = rowY + imgH + 22;
         doc.moveDown(0.5);
@@ -166,41 +165,44 @@ function generatePdfBuffer(data) {
     doc.moveDown(0.3);
 
     // ── 4.0 COMENTARIOS ──────────────────────────────────
-    if (doc.y > doc.page.height - 200) doc.addPage();
+    checkNewPage(180);
     secTitle('4.0 Comentarios y Acciones');
-
     subSecTitle('4.1 Situación General');
     bodyText(cleanLine(situacionGeneral||'No se registran observaciones críticas.'));
-
     subSecTitle('4.2 Cumplimiento de Cronograma');
     bodyText(cleanLine(cumplimientoCronograma||'Las actividades se desarrollan según el programa.'));
-
     subSecTitle('4.3 Avance del Proyecto');
     bodyText('Avance físico estimado '+avance+'%'+(avanceProyecto&&avanceProyecto.trim()?' - '+avanceProyecto.trim():'.'));
-
     subSecTitle('4.4 Acciones Requeridas');
     const accLines = (accionesRequeridas||'').split('\n').map(l=>l.trim()).filter(l=>l);
     if (accLines.length) accLines.forEach((l,i) => romanItem(l,i));
     else bodyText('No se identifican acciones inmediatas.');
 
-    // ── FOOTER on each page ───────────────────────────────
-    const pageCount = doc.bufferedPageRange().count || 1;
-    for (let i = 0; i < pageCount; i++) {
-      doc.switchToPage(i);
-      // Vertical code on left
+    // ── FOOTER — add after all pages are created ──────────
+    const range = doc.bufferedPageRange();
+    const totalPages = range.count;
+
+    for (let i = 0; i < totalPages; i++) {
+      doc.switchToPage(range.start + i);
+      const pageH = doc.page.height;
+      const pageW = doc.page.width;
+
+      // Vertical code on left margin
       doc.save();
-      doc.translate(30, doc.page.height/2 + 60);
+      doc.translate(22, pageH/2 + 50);
       doc.rotate(-90);
       doc.font('Helvetica').fontSize(8).fillColor(GRAY)
          .text(codigo, 0, 0, { lineBreak: false });
       doc.restore();
-      // Page number right
+
+      // Page number bottom right
       doc.font('Helvetica').fontSize(8).fillColor(GRAY)
-         .text('Pág '+(i+1)+' / '+pageCount,
-           68, doc.page.height-40, { width: PAGE_W, align: 'right' });
+         .text('Pág '+(i+1)+' / '+totalPages,
+           68, pageH-35, { width: PAGE_W, align: 'right' });
     }
 
     doc.end();
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
   });
 }
 
